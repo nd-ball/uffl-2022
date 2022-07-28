@@ -1,0 +1,495 @@
+---
+title: "What We Talk About When We Talk About Life: A Computational Textual Analysis of the UFFL Life and Learning Conference"
+subtitle: "Figure Generation"
+author: "John P. Lalor"
+date: ""
+---
+
+
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(
+                      comment = '',
+                      fig.width = 5,
+                      fig.height = 4,
+                      echo = FALSE,
+                      results = "hide",
+                      warning = FALSE,
+                      error = FALSE,
+                      message = FALSE,
+                      include = FALSE
+)
+```
+
+```{r dataload}
+
+# leveraging this web page for much of the below code
+# https://juliasilge.github.io/tidytext/articles/topic_modeling.html?utm_source=pocket_mylist
+# also https://www.tidytextmining.com/
+library(dplyr)
+library(readr)
+library(stringr)
+library(tidytext)
+library(tidyr)
+library(revtools)
+library(topicmodels)
+library(ggplot2)
+library(forcats)
+library(kableExtra)
+library(wordcloud)
+library(scales)
+library(flextable)
+
+set_flextable_defaults(font.size = 11, padding = 3)
+
+
+set.seed(42)
+
+D <- read_csv(
+    "code/UFFL2022.csv"
+) %>%
+    select(
+        "Publication Year",
+        Author,
+        Title
+    ) %>%
+    rename(
+        Year = "Publication Year"
+    )
+
+D.abstracts <- read_bibliography("code/UFFL2022.ris") %>%
+    select(
+        label,
+        title,
+        author,
+        abstract,
+        year
+    ) %>%
+    filter(
+        !is.na(abstract)
+    ) %>%
+    mutate(
+        year = as.double(year)
+    ) %>%
+    filter(year > 2004) %>%
+    mutate(
+        abstract = str_replace_all(
+            abstract,
+            c(
+                "<e2><80><99>" =  "",
+                "<e2><80><93>" =  "",
+                "â" = " ",
+                "<e2><80><9c>" =  "",
+                "<e2><80><9d>" =  "",
+                "<c2><b3>" = ""
+            )
+        )
+    ) %>%
+    mutate(
+        title = str_replace_all(
+            title,
+            c(
+                "â" = " "
+            )
+        )
+    )
+
+D.titles <- read_bibliography("code/UFFL2022.ris") %>%
+    select(
+        label,
+        title,
+        author,
+        abstract,
+        year
+    ) %>%
+    mutate(
+        year = as.double(year)
+    ) %>%
+    filter(year > 1990) %>%
+    mutate(
+        abstract = str_replace_all(
+            abstract,
+            c(
+                "<e2><80><99>" =  "'",
+                "<e2><80><93>" =  "'",
+                "â" = " "
+            )
+        )
+    ) %>%
+    mutate(
+        title = str_replace_all(
+            title,
+            c(
+                "â" = " "
+            )
+        )
+    )
+
+
+```
+
+```{r wordCloud}
+
+all_words <- D.titles %>%
+    select(
+        title
+    ) %>%
+    unnest_tokens(word, title) %>%
+    count(word, sort = TRUE)
+
+all_words <- anti_join(
+    all_words,
+    stop_words,
+    by="word"
+) 
+
+```
+
+```{r yearWordsTitles}
+year_words_title <- D.titles %>%
+    select(
+        title,
+        year
+    ) %>%
+    unnest_tokens(word, title) %>%
+    count(year, word, sort = TRUE) %>%
+    ungroup
+
+total_words_title <- year_words_title %>% 
+  group_by(year) %>% 
+    summarize(total = sum(n)) 
+
+year_words_title <- left_join(year_words_title, total_words_title)
+
+
+mystopwords <- tibble(word = c("test"))
+
+year_words_title <- anti_join(
+    year_words_title,
+    mystopwords,
+    by="word"
+)
+
+year_words_title <- anti_join(
+    year_words_title,
+    stop_words,
+    by="word"
+) 
+
+```
+
+
+```{r yearWordsAbstracts}
+# tfidf by abstract by year
+
+year_words <- D.abstracts %>%
+    select(
+        abstract,
+        year
+    ) %>%
+    unnest_tokens(word, abstract) %>%
+    count(year, word, sort = TRUE)
+
+total_words <- year_words %>% 
+  group_by(year) %>% 
+  summarize(total = sum(n))
+
+year_words <- left_join(year_words, total_words)
+
+
+mystopwords <- tibble(word = c("test"))
+
+year_words <- anti_join(
+    year_words,
+    mystopwords,
+    by="word"
+)
+
+year_words <- anti_join(
+    year_words,
+    stop_words,
+    by="word"
+) 
+
+
+year_tf_idf <- year_words %>%
+    bind_tf_idf(word, year, n)
+
+year_tf_idf %>%
+  select(-total) %>%
+    arrange(desc(tf_idf))
+```
+
+
+```{r bigrams}
+
+abstract_bigrams <- D.abstracts %>%
+    select(
+        year,
+        abstract
+    ) %>%
+    unnest_tokens(bigram, abstract, token = "ngrams", n = 2)
+
+bigrams_separated <- abstract_bigrams %>%
+  separate(bigram, c("word1", "word2"), sep = " ")
+
+bigrams_filtered <- bigrams_separated %>%
+    filter(!word1 %in% stop_words$word) %>%
+    filter(!word2 %in% stop_words$word) 
+
+# new bigram counts:
+bigram_counts <- bigrams_filtered %>% 
+  count(year, word1, word2, sort = TRUE)
+
+
+bigrams_united <- bigram_counts %>%
+  unite(bigram, word1, word2, sep = " ")
+
+```
+
+
+```{r}
+bigrams_united %>%
+    filter (n > 2) 
+
+```
+
+
+```{r trigrams}
+abstract_bigrams <- D.abstracts %>%
+    select(
+        year,
+        abstract
+    ) %>%
+    unnest_tokens(bigram, abstract, token = "ngrams", n = 3)
+
+bigrams_separated <- abstract_bigrams %>%
+  separate(bigram, c("word1", "word2", "word3"), sep = " ")
+
+bigrams_filtered <- bigrams_separated %>%
+    filter(!word1 %in% stop_words$word) %>%
+    filter(!word2 %in% stop_words$word) %>%
+    filter(!word3 %in% stop_words$word)
+
+# new bigram counts:
+bigram_counts <- bigrams_filtered %>% 
+  count(word1, word2, word3, sort = TRUE)
+
+trigrams_united <- bigram_counts %>%
+  unite(bigram, word1, word2, word3, sep = " ")
+
+```
+
+
+
+```{r abstractTopics}
+by_word <- D.abstracts %>%
+    select(
+        label,
+        abstract) %>%
+    unnest_tokens(word, abstract)
+
+word_counts <- by_word %>%
+    anti_join(stop_words) %>%
+    count(label, word, sort = TRUE)
+
+
+abstracts_dtm <- word_counts %>%
+  cast_dtm(label, word, n)
+
+abstracts_dtm
+
+abstracts_lda <- LDA(abstracts_dtm, k = 4, control = list(seed = 1234))
+abstracts_lda
+
+abstracts_lda_td <- tidy(abstracts_lda)
+abstracts_lda_td
+
+abstracts_lda_gamma <- tidy(abstracts_lda, matrix="gamma") %>%
+    mutate(year = str_extract(document, "\\d{4}")) %>%
+    mutate(year = as.integer(year)) %>%
+    group_by(year, topic) %>%
+    summarize(weight = mean(gamma))
+abstracts_lda_gamma
+
+# re-rank top topic terms for topic names
+
+top_terms <- abstracts_lda_td %>%
+  group_by(topic) %>%
+  top_n(15, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+top_terms
+
+
+topicnames <- top_terms %>%
+    group_by(topic) %>%
+    slice_max(order_by=beta, n=10) %>%
+    mutate(text=paste0(term, collapse=" ")) %>%
+    slice(1)
+
+topicnames2 <- top_terms %>%
+    group_by(topic) %>%
+    slice_min(order_by=beta, n=10) %>%
+    arrange(topic, -beta) %>%
+    mutate(text=paste0(term, collapse=" ")) %>%
+    slice(1)
+
+
+theme_set(theme_bw())
+
+top_terms %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(term, beta)) +
+  geom_bar(stat = "identity") +
+  scale_x_reordered() +
+  facet_wrap(~ topic, scales = "free_x")
+
+
+```
+
+
+
+## Topic Modeling
+ 
+```{r bleifig, include=TRUE, fig.cap="Example of topic modeling from Blei (2012)", fig.align="center"}
+library(png)
+library(grid)
+img <- readPNG("./blei_fig.png")
+grid.raster(img)
+```
+## Title-Level Results
+
+```{r countsByYear, include=TRUE, fig.align="center", fig.cap="Count of the number of articles by year."}
+cpalette <- palette.colors(palette = "Okabe-Ito")
+cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+D.titles %>%
+    group_by(year) %>%
+    summarize(count = n()) %>%
+    ggplot(aes(x=as.factor(year), y=count, fill=as.factor(year))) +
+    geom_bar(stat="identity") +
+    theme(
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position="none"
+    ) +
+    labs(x="Year") +
+    scale_fill_manual(values=rep(cbPalette,5))
+
+```
+
+
+
+```{r showWordCloud, include=TRUE, fig.align="center", fig.cap="Word cloud of the most frequent words in article titles from previous Life and Learning conferences."}
+all_words %>%
+    with(
+        wordcloud(
+            word,
+            n,
+            max.words=50,
+            colors=cbPalette,
+            scale=c(2.5,1),
+            random.order=TRUE
+        )
+    )
+
+```
+
+
+```{r plotYearWordsTitles, include=TRUE, results="markup", tab.cap="The most frequent words in Life and Learning article titles by year."}
+options(knitr.kable.NA = '')
+year_words_title %>%
+    filter(n>1) %>%
+    group_by(year) %>%
+    slice_max(order_by=n, n=5) %>%
+        select(year, word) %>%
+    mutate(rank = row_number(year)) %>%
+    filter(rank < 8) %>%
+    pivot_wider(names_from=rank, values_from=word) %>%
+    flextable() %>%
+    autofit()
+
+```
+
+
+## Abstract-Level Results
+
+
+
+```{r tfidf, include=TRUE, results="markup", tab.cap="Words with the highest TF-IDF scores for each year of the conference."}
+year_tf_idf %>%
+  group_by(year) %>%
+    slice_max(tf_idf, n = 5) %>%
+    select(year, word) %>%
+    mutate(rank = row_number(year)) %>%
+    filter(rank < 8) %>%
+    pivot_wider(names_from=rank, values_from=word) %>%
+    flextable() %>%
+    autofit()
+```
+
+
+```{r bigramsPlot, results="markup", include=TRUE, tab.cap="Most frequent bigrams by year."}
+
+options(knitr.kable.NA = '')
+
+bigrams_united %>%
+    filter(n > 2) %>%
+  group_by(year) %>%
+  slice_max(n, n = 3) %>%
+    select(year, bigram) %>%
+    mutate(rank = row_number(year)) %>%
+    filter(rank <= 4) %>%
+    pivot_wider(names_from=rank, values_from=bigram) %>%
+    flextable() %>%
+    autofit()
+
+```
+
+```{r trigramsPlot, results="markup", include=TRUE, tab.cap="Most frequent trigrams overall."}
+trigrams_united %>%
+    filter (n > 3) %>%
+    flextable() %>%
+    autofit()
+
+```
+
+```{r topics, include=TRUE, fig.align="center", fig.cap="Top tokens per topic.", fig.width=6,fig.height=5}
+top_terms %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(beta, term, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+    scale_y_reordered() +
+    scale_fill_manual(values=cbPalette)
+
+```
+
+```{r topicsByYear, include=TRUE, fig.align="center", fig.cap="Topic weights by year.", fig.width=6}
+abstracts_lda_gamma  %>%
+ggplot(aes(x=as.factor(year), y=weight, fill=as.factor(topic))) + 
+    geom_bar(stat = "identity") + ylab("proportion") + 
+    scale_fill_manual(name="topic", labels=topicnames$text, values=cbPalette) + 
+    theme(
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position="top"
+    ) +
+    guides(fill=guide_legend(nrow=4, byrow=TRUE)) +
+    labs(x="Year")
+
+```
+
+
+```{r topicsByYear2, include=TRUE, fig.align="center", fig.cap="Topic weights by year. Here topic names exclude the first 5 words in each topic.", fig.width=6}
+abstracts_lda_gamma  %>%
+ggplot(aes(x=as.factor(year), y=weight, fill=as.factor(topic))) + 
+    geom_bar(stat = "identity") + ylab("proportion") + 
+    scale_fill_manual(name="topic", labels=topicnames2$text, values=cbPalette) + 
+    theme(
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position="top"
+    ) +
+    guides(fill=guide_legend(nrow=4, byrow=TRUE)) +
+    labs(x="Year")
+
+```
+
